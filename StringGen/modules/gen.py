@@ -1,5 +1,4 @@
 import asyncio
-import os
 
 from pyrogram import Client, filters
 from oldpyro import Client as Client1
@@ -282,4 +281,3 @@ async def cancelled(message):
         return True
     else:
         return False
-            
