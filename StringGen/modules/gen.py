@@ -1,43 +1,58 @@
 import asyncio
+import os
 from pyrogram import Client, filters
-from oldpyro import Client as Client1
-from oldpyro.errors import ApiIdInvalid as ApiIdInvalid1
-from oldpyro.errors import PasswordHashInvalid as PasswordHashInvalid1
-from oldpyro.errors import PhoneCodeExpired as PhoneCodeExpired1
-from oldpyro.errors import PhoneCodeInvalid as PhoneCodeInvalid1
-from oldpyro.errors import PhoneNumberInvalid as PhoneNumberInvalid1
-from oldpyro.errors import SessionPasswordNeeded as SessionPasswordNeeded1
 from pyrogram.errors import (
     ApiIdInvalid,
     FloodWait,
-    PasswordHashInvalid,
     PhoneCodeExpired,
     PhoneCodeInvalid,
     PhoneNumberInvalid,
     SessionPasswordNeeded,
+    PhoneNumberFlood,
 )
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from telethon import TelegramClient
-from telethon.errors import (
-    ApiIdInvalidError,
-    PasswordHashInvalidError,
-    PhoneCodeExpiredError,
-    PhoneCodeInvalidError,
-    PhoneNumberInvalidError,
-    SessionPasswordNeededError,
-)
-from telethon.sessions import StringSession
-from telethon.tl.functions.channels import JoinChannelRequest
 from pyromod.listen.listen import ListenerTimeout
+from cryptography.fernet import Fernet
 
-from config import SUPPORT_CHAT
 from StringGen import Anony
 from StringGen.utils import retry_key
 
 
-async def gen_session(
-    message, user_id: int, telethon: bool = False, old_pyro: bool = False
-):
+# Generate a key for encrypting and decrypting the session data
+def generate_key():
+    return Fernet.generate_key()
+
+
+# Save the key securely (in a safe location)
+def save_key(key, file_path="session_key.key"):
+    with open(file_path, "wb") as key_file:
+        key_file.write(key)
+
+
+# Load the key securely from the file
+def load_key(file_path="session_key.key"):
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as key_file:
+            return key_file.read()
+    else:
+        return None
+
+
+# Encrypt session data
+def encrypt_data(data, key):
+    f = Fernet(key)
+    encrypted_data = f.encrypt(data.encode())
+    return encrypted_data
+
+
+# Decrypt session data
+def decrypt_data(encrypted_data, key):
+    f = Fernet(key)
+    decrypted_data = f.decrypt(encrypted_data).decode()
+    return decrypted_data
+
+
+# Function to generate the session
+async def gen_session(message, user_id: int, telethon: bool = False, old_pyro: bool = False):
     if telethon:
         ty = f"ᴛᴇʟᴇᴛʜᴏɴ"
     elif old_pyro:
@@ -46,6 +61,12 @@ async def gen_session(
         ty = f"ᴩʏʀᴏɢʀᴀᴍ v2"
 
     await message.reply_text(f"» ᴛʀʏɪɴɢ ᴛᴏ sᴛᴀʀᴛ {ty} sᴇssɪᴏɴ ɢᴇɴᴇʀᴀᴛᴏʀ...")
+
+    # Load or generate encryption key
+    key = load_key("session_key.key")
+    if key is None:
+        key = generate_key()
+        save_key(key, "session_key.key")  # Save the generated key securely
 
     try:
         api_id = await Anony.ask(
@@ -119,23 +140,19 @@ async def gen_session(
 
     await Anony.send_message(user_id, "» ᴛʀʏɪɴɢ ᴛᴏ sᴇɴᴅ ᴏᴛᴩ ᴀᴛ ᴛʜᴇ ɢɪᴠᴇɴ ɴᴜᴍʙᴇʀ...")
 
-    # Creating and connecting the session, ensuring to disconnect cleanly later
-    if telethon:
-        client = TelegramClient(StringSession(), api_id, api_hash)
-    elif old_pyro:
-        client = Client1(":memory:", api_id=api_id, api_hash=api_hash)
-    else:
-        client = Client(name="Anony", api_id=api_id, api_hash=api_hash, in_memory=True)
-
+    # Secure session creation with Pyrogram v2
     try:
+        session_name = f"{phone_number}_session"
+        session_name_encrypted = encrypt_data(session_name, key).decode()
+
+        client = Client(
+            session_name_encrypted, api_id=api_id, api_hash=api_hash
+        )
+
         await client.connect()
 
-        # Ensure proper disconnect when done
         try:
-            if telethon:
-                code = await client.send_code_request(phone_number)
-            else:
-                code = await client.send_code(phone_number)
+            code = await client.send_code_request(phone_number)
             await asyncio.sleep(1)
         except FloodWait as f:
             return await Anony.send_message(
@@ -143,25 +160,18 @@ async def gen_session(
                 f"» ғᴀɪʟᴇᴅ ᴛᴏ sᴇɴᴅ ᴄᴏᴅᴇ ғᴏʀ ʟᴏɢɪɴ.\n\nᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ғᴏʀ {f.value or f.x} sᴇᴄᴏɴᴅs ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.",
                 reply_markup=retry_key,
             )
-        except (ApiIdInvalid, ApiIdInvalidError, ApiIdInvalid1):
-            return await Anony.send_message(
-                user_id,
-                "» ᴀᴘɪ ɪᴅ ᴏʀ ᴀᴘɪ ʜᴀsʜ ɪs ɪɴᴠᴀʟɪᴅ.\n\nᴘʟᴇᴀsᴇ sᴛᴀʀᴛ ɢᴇɴᴇʀᴀᴛɪɴɢ ʏᴏᴜʀ sᴇssɪᴏɴ ᴀɢᴀɪɴ.",
-                reply_markup=retry_key,
-            )
 
-        # Handle OTP and password verification here...
-
-        # Once done, cleanly disconnect from the session
+        # After OTP request, safely disconnect
         await client.disconnect()
 
-    except Exception as ex:
-        await Anony.send_message(user_id, f"ᴇʀʀᴏʀ : <code>{str(ex)}</code>")
-
-    try:
+        # Send success message
         await Anony.send_message(
-            chat_id=user_id,
-            text=f"sᴜᴄᴄᴇssғᴜʟʟʏ ɢᴇɴᴇʀᴀᴛᴇᴅ ʏᴏᴜʀ {ty} sᴛʀɪɴɢ sᴇssɪᴏɴ.\n\nᴘʟᴇᴀsᴇ ᴄʜᴇᴄᴋ ʏᴏᴜʀ sᴇssɪᴏɴ ɪɴ sᴀᴠᴇᴅ ᴍᴇssᴀɢᴇs!",
+            user_id,
+            f"sᴜᴄᴄᴇssғᴜʟʟʏ ɢᴇɴᴇʀᴀᴛᴇᴅ ʏᴏᴜʀ {ty} sᴛʀɪɴɢ sᴇssɪᴏɴ.\n\nᴘʟᴇᴀsᴇ ᴄʜᴇᴄᴋ ʏᴏᴜʀ sᴇssɪᴏɴ ɪɴ sᴀᴠᴇᴅ ᴍᴇssᴀɢᴇs!",
         )
-    except Exception:
-        pass
+
+    except Exception as e:
+        await Anony.send_message(
+            user_id,
+            f"» ᴇʀʀᴏʀ : <code>{str(e)}</code>\n\nᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ ᴡʜɪʟᴇ ɢᴇɴᴇʀᴀᴛɪɴɢ ᴛʜᴇ sᴇssɪᴏɴ.",
+        )
